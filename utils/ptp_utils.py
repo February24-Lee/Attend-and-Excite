@@ -7,11 +7,17 @@ from IPython.display import display
 from PIL import Image
 from typing import Union, Tuple, List
 
-from diffusers.models.cross_attention import CrossAttention
+try:
+    from diffusers.models.cross_attention import CrossAttention
+except:
+    from diffusers.models.attention import Attention as CrossAttention
 
-def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)) -> np.ndarray:
+
+def text_under_image(
+    image: np.ndarray, text: str, text_color: Tuple[int, int, int] = (0, 0, 0)
+) -> np.ndarray:
     h, w, c = image.shape
-    offset = int(h * .2)
+    offset = int(h * 0.2)
     img = np.ones((h + offset, w, c), dtype=np.uint8) * 255
     font = cv2.FONT_HERSHEY_SIMPLEX
     img[:h] = image
@@ -21,11 +27,13 @@ def text_under_image(image: np.ndarray, text: str, text_color: Tuple[int, int, i
     return img
 
 
-def view_images(images: Union[np.ndarray, List],
-                num_rows: int = 1,
-                offset_ratio: float = 0.02,
-                display_image: bool = True) -> Image.Image:
-    """ Displays a list of images in a grid. """
+def view_images(
+    images: Union[np.ndarray, List],
+    num_rows: int = 1,
+    offset_ratio: float = 0.02,
+    display_image: bool = True,
+) -> Image.Image:
+    """Displays a list of images in a grid."""
     if type(images) is list:
         num_empty = len(images) % num_rows
     elif images.ndim == 4:
@@ -41,12 +49,23 @@ def view_images(images: Union[np.ndarray, List],
     h, w, c = images[0].shape
     offset = int(h * offset_ratio)
     num_cols = num_items // num_rows
-    image_ = np.ones((h * num_rows + offset * (num_rows - 1),
-                      w * num_cols + offset * (num_cols - 1), 3), dtype=np.uint8) * 255
+    image_ = (
+        np.ones(
+            (
+                h * num_rows + offset * (num_rows - 1),
+                w * num_cols + offset * (num_cols - 1),
+                3,
+            ),
+            dtype=np.uint8,
+        )
+        * 255
+    )
     for i in range(num_rows):
         for j in range(num_cols):
-            image_[i * (h + offset): i * (h + offset) + h:, j * (w + offset): j * (w + offset) + w] = images[
-                i * num_cols + j]
+            image_[
+                i * (h + offset) : i * (h + offset) + h :,
+                j * (w + offset) : j * (w + offset) + w,
+            ] = images[i * num_cols + j]
 
     pil_img = Image.fromarray(image_)
     if display_image:
@@ -61,14 +80,26 @@ class AttendExciteCrossAttnProcessor:
         self.attnstore = attnstore
         self.place_in_unet = place_in_unet
 
-    def __call__(self, attn: CrossAttention, hidden_states, encoder_hidden_states=None, attention_mask=None):
+    def __call__(
+        self,
+        attn: CrossAttention,
+        hidden_states,
+        encoder_hidden_states=None,
+        attention_mask=None,
+    ):
         batch_size, sequence_length, _ = hidden_states.shape
-        attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length)
+        attention_mask = attn.prepare_attention_mask(
+            attention_mask, sequence_length, batch_size
+        )
 
         query = attn.to_q(hidden_states)
 
         is_cross = encoder_hidden_states is not None
-        encoder_hidden_states = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
+        encoder_hidden_states = (
+            encoder_hidden_states
+            if encoder_hidden_states is not None
+            else hidden_states
+        )
         key = attn.to_k(encoder_hidden_states)
         value = attn.to_v(encoder_hidden_states)
 
@@ -96,7 +127,11 @@ def register_attention_control(model, controller):
     attn_procs = {}
     cross_att_count = 0
     for name in model.unet.attn_processors.keys():
-        cross_attention_dim = None if name.endswith("attn1.processor") else model.unet.config.cross_attention_dim
+        cross_attention_dim = (
+            None
+            if name.endswith("attn1.processor")
+            else model.unet.config.cross_attention_dim
+        )
         if name.startswith("mid_block"):
             hidden_size = model.unet.config.block_out_channels[-1]
             place_in_unet = "mid"
@@ -165,12 +200,18 @@ class AttentionStore(AttentionControl):
 
     @staticmethod
     def get_empty_store():
-        return {"down_cross": [], "mid_cross": [], "up_cross": [],
-                "down_self": [], "mid_self": [], "up_self": []}
+        return {
+            "down_cross": [],
+            "mid_cross": [],
+            "up_cross": [],
+            "down_self": [],
+            "mid_self": [],
+            "up_self": [],
+        }
 
     def forward(self, attn, is_cross: bool, place_in_unet: str):
         key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
-        if attn.shape[1] <= 32 ** 2:  # avoid memory overhead
+        if attn.shape[1] <= 32**2:  # avoid memory overhead
             self.step_store[key].append(attn)
         return attn
 
@@ -183,7 +224,9 @@ class AttentionStore(AttentionControl):
                 else:
                     for key in self.global_store:
                         for i in range(len(self.global_store[key])):
-                            self.global_store[key][i] += self.step_store[key][i].detach()
+                            self.global_store[key][i] += self.step_store[key][
+                                i
+                            ].detach()
         self.step_store = self.get_empty_store()
         self.step_store = self.get_empty_store()
 
@@ -192,8 +235,10 @@ class AttentionStore(AttentionControl):
         return average_attention
 
     def get_average_global_attention(self):
-        average_attention = {key: [item / self.cur_step for item in self.global_store[key]] for key in
-                             self.attention_store}
+        average_attention = {
+            key: [item / self.cur_step for item in self.global_store[key]]
+            for key in self.attention_store
+        }
         return average_attention
 
     def reset(self):
@@ -203,10 +248,10 @@ class AttentionStore(AttentionControl):
         self.global_store = {}
 
     def __init__(self, save_global_store=False):
-        '''
+        """
         Initialize an empty AttentionStore
         :param step_index: used to visualize only a specific step in the diffusion process
-        '''
+        """
         super(AttentionStore, self).__init__()
         self.save_global_store = save_global_store
         self.step_store = self.get_empty_store()
@@ -215,15 +260,17 @@ class AttentionStore(AttentionControl):
         self.curr_step_index = 0
 
 
-def aggregate_attention(attention_store: AttentionStore,
-                        res: int,
-                        from_where: List[str],
-                        is_cross: bool,
-                        select: int) -> torch.Tensor:
-    """ Aggregates the attention across the different layers and heads at the specified resolution. """
+def aggregate_attention(
+    attention_store: AttentionStore,
+    res: int,
+    from_where: List[str],
+    is_cross: bool,
+    select: int,
+) -> torch.Tensor:
+    """Aggregates the attention across the different layers and heads at the specified resolution."""
     out = []
     attention_maps = attention_store.get_average_attention()
-    num_pixels = res ** 2
+    num_pixels = res**2
     for location in from_where:
         for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
             if item.shape[1] == num_pixels:
