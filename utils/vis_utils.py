@@ -62,9 +62,10 @@ def show_image_relevance(
     image_relevance = image_relevance.reshape(
         1, 1, image_relevance.shape[-1], image_relevance.shape[-1]
     )
-    # image_relevance = (
-    #     image_relevance.cuda()
-    # )  # because float16 precision interpolation is not supported on cpu
+    if torch.cuda.is_available():
+        image_relevance = (
+            image_relevance.cuda()
+        )  # because float16 precision interpolation is not supported on cpu
     image_relevance = torch.nn.functional.interpolate(
         image_relevance, size=relevnace_res, mode="bilinear"
     )
