@@ -591,29 +591,28 @@ class AttendAndExcitePipeline(StableDiffusionPipeline):
 
                     latents = latents.clone().detach().requires_grad_(True)
 
-                    # Forward pass of denoising with text conditioning
-                    noise_pred_text = self.unet(
-                        latents,
-                        t,
-                        encoder_hidden_states=prompt_embeds[1].unsqueeze(0),
-                        cross_attention_kwargs=cross_attention_kwargs,
-                    ).sample
-                    self.unet.zero_grad()
-
-                    # Get max activation value for each subject token
-                    max_attention_per_index = (
-                        self._aggregate_and_get_max_attention_per_token(
-                            attention_store=attention_store,
-                            indices_to_alter=indices_to_alter,
-                            attention_res=attention_res,
-                            smooth_attentions=smooth_attentions,
-                            sigma=sigma,
-                            kernel_size=kernel_size,
-                            normalize_eot=sd_2_1,
-                        )
-                    )
-
                     if not run_standard_sd:
+                        # Forward pass of denoising with text conditioning
+                        noise_pred_text = self.unet(
+                            latents,
+                            t,
+                            encoder_hidden_states=prompt_embeds[1].unsqueeze(0),
+                            cross_attention_kwargs=cross_attention_kwargs,
+                        ).sample
+                        self.unet.zero_grad()
+
+                        # Get max activation value for each subject token
+                        max_attention_per_index = (
+                            self._aggregate_and_get_max_attention_per_token(
+                                attention_store=attention_store,
+                                indices_to_alter=indices_to_alter,
+                                attention_res=attention_res,
+                                smooth_attentions=smooth_attentions,
+                                sigma=sigma,
+                                kernel_size=kernel_size,
+                                normalize_eot=sd_2_1,
+                            )
+                        )
 
                         loss = self._compute_loss(
                             max_attention_per_index=max_attention_per_index

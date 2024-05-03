@@ -20,11 +20,16 @@ def show_cross_attention(
     orig_image=None,
     is_cross=True,
     disaply_size=16,
+    is_global=False,
+    t=0,
+    target="both",  # 'pos', 'neg', 'both'
 ):
     tokens = tokenizer.encode(prompt)
     decoder = tokenizer.decode
     attention_maps = (
-        aggregate_attention(attention_store, res, from_where, is_cross, select)
+        aggregate_attention(
+            attention_store, res, from_where, is_cross, select, is_global, t, target
+        )
         .detach()
         .cpu()
     )
