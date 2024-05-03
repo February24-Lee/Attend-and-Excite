@@ -221,13 +221,18 @@ class AttentionStore(AttentionControl):
             with torch.no_grad():
                 if len(self.global_store) == 0:
                     self.global_store = self.step_store
+                    for key, value in self.global_store.items():
+                        self.global_store[key] = [[i] for i in value]
+
                 else:
                     for key in self.global_store:
                         for i in range(len(self.global_store[key])):
-                            self.global_store[key][i] += self.step_store[key][
-                                i
-                            ].detach()
-        self.step_store = self.get_empty_store()
+                            self.global_store[key][i] += [
+                                self.step_store[key][i].detach()
+                            ]
+                            # self.global_store[key][i] += self.step_store[key][
+                            #     i
+                            # ].detach()
         self.step_store = self.get_empty_store()
 
     def get_average_attention(self):
@@ -235,10 +240,11 @@ class AttentionStore(AttentionControl):
         return average_attention
 
     def get_average_global_attention(self):
-        average_attention = {
-            key: [item / self.cur_step for item in self.global_store[key]]
-            for key in self.attention_store
-        }
+        # average_attention = {
+        #     key: [item / self.cur_step for item in self.global_store[key]]
+        #     for key in self.attention_store
+        # }
+        average_attention = self.global_store
         return average_attention
 
     def reset(self):
@@ -266,14 +272,31 @@ def aggregate_attention(
     from_where: List[str],
     is_cross: bool,
     select: int,
+    is_global=False,
+    t=0,
+    target="both",  # 'pos', 'neg', 'both'
 ) -> torch.Tensor:
     """Aggregates the attention across the different layers and heads at the specified resolution."""
     out = []
-    attention_maps = attention_store.get_average_attention()
+    if is_global:
+        attention_maps = attention_store.get_average_global_attention()
+    else:
+        attention_maps = attention_store.get_average_attention()
     num_pixels = res**2
     for location in from_where:
         for item in attention_maps[f"{location}_{'cross' if is_cross else 'self'}"]:
-            if item.shape[1] == num_pixels:
+            if is_global and item[0].shape[1] == num_pixels:
+                if target == "pos":
+                    _item = item[t][item[t].shape[0] // 2 :]
+                elif target == "neg":
+                    _item = item[t][: item[t].shape[0] // 2]
+                else:
+                    _item = item[t]
+                cross_maps = _item.reshape(1, -1, res, res, item[t].shape[-1])[select]
+                out.append(cross_maps)
+            elif is_global:
+                continue
+            elif item.shape[1] == num_pixels:
                 cross_maps = item.reshape(1, -1, res, res, item.shape[-1])[select]
                 out.append(cross_maps)
     out = torch.cat(out, dim=0)
