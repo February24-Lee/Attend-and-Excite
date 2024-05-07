@@ -6,6 +6,7 @@ import torch
 from IPython.display import display
 from PIL import Image
 from typing import Union, Tuple, List
+from copy import deepcopy
 
 try:
     from diffusers.models.cross_attention import CrossAttention
@@ -109,7 +110,14 @@ class AttendExciteCrossAttnProcessor:
 
         attention_probs = attn.get_attention_scores(query, key, attention_mask)
 
+        # store attention
         self.attnstore(attention_probs, is_cross, self.place_in_unet)
+        if isinstance(self.attnstore, AttentionStoreSwap) and self.attnstore.check_swap(
+            attention_probs
+        ):
+            attention_probs = self.attnstore.get_source_global_attention(
+                is_cross, self.place_in_unet
+            )
 
         hidden_states = torch.bmm(attention_probs, value)
         hidden_states = attn.batch_to_head_dim(hidden_states)
@@ -230,9 +238,6 @@ class AttentionStore(AttentionControl):
                             self.global_store[key][i] += [
                                 self.step_store[key][i].detach()
                             ]
-                            # self.global_store[key][i] += self.step_store[key][
-                            #     i
-                            # ].detach()
         self.step_store = self.get_empty_store()
 
     def get_average_attention(self):
@@ -264,6 +269,65 @@ class AttentionStore(AttentionControl):
         self.attention_store = {}
         self.global_store = {}
         self.curr_step_index = 0
+
+
+class AttentionStoreSwap(AttentionStore):
+    _mode: str = "swap"  # "swap" or "store"
+
+    def __init__(self, save_global_store=True, swap_start_step=1, swap_end_step=0):
+        super().__init__(save_global_store)
+        self.curr_target_step_index = 0
+        self.curr_target_layer = {
+            "down_cross": 0,
+            "mid_cross": 0,
+            "up_cross": 0,
+            "down_self": 0,
+            "mid_self": 0,
+            "up_self": 0,
+        }
+        self.source_global_store = {}
+        self.swap_start_step = swap_start_step
+        self.swap_end_step = swap_end_step
+
+    def between_steps(self):
+        self.curr_target_step_index += 1
+        self.curr_target_layer = {
+            "down_cross": 0,
+            "mid_cross": 0,
+            "up_cross": 0,
+            "down_self": 0,
+            "mid_self": 0,
+            "up_self": 0,
+        }
+        super(AttentionStoreSwap, self).between_steps()
+
+    def setup_global_store(self):
+        self.source_global_store = deepcopy(self.global_store)
+        self.curr_target_step_index = 0
+        self.reset()
+
+    def check_swap(self, attn):
+        if self.mode == "swap" and attn.shape[1] <= 32**2:
+            if self.swap_start_step <= self.curr_target_step_index < self.swap_end_step:
+                return True
+        return False
+
+    def get_source_global_attention(self, is_cross: bool, place_in_unet: str):
+        key = f"{place_in_unet}_{'cross' if is_cross else 'self'}"
+        attn = self.source_global_store[key][self.curr_target_layer[key]][
+            self.curr_target_step_index
+        ]
+        self.curr_target_layer[key] += 1
+        return attn
+
+    @property
+    def mode(self):
+        return self._mode
+
+    @mode.setter
+    def mode(self, value: str):
+        assert value in ["swap", "store"], f"Invalid mode: {value}"
+        self._mode = value
 
 
 def aggregate_attention(
